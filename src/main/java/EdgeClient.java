@@ -24,7 +24,7 @@ public class EdgeClient extends DB {
     private static final AtomicInteger initCounter = new AtomicInteger();
     private static final Map<Long, CompletableFuture<ResponseMessage>> responseCallbacks = new ConcurrentHashMap<>();
     private static final Map<Long, CompletableFuture<PersistenceMessage>> persistenceCallbacks = new ConcurrentHashMap<>();
-    private static AtomicInteger idCounter = new AtomicInteger();
+    private static final AtomicInteger idCounter = new AtomicInteger();
     private static SimpleClientChannel<BabelMessage> channel = null;
 
     private static CompletableFuture<ServerUpEvent> channelFuture = null;
