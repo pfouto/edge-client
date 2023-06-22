@@ -85,7 +85,7 @@
                             <goal>shade</goal>
                         </goals>
                         <configuration>
-                            <finalName>../deploy/client/client</finalName>
+                            <finalName>../deploy/client</finalName>
                         </configuration>
                     </execution>
                 </executions>
