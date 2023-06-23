@@ -46,9 +46,9 @@ public class EdgeClient extends DB {
             synchronized (initCounter) {
                 if (channel == null) {
                     //ONCE
-                    timeoutMillis = Integer.parseInt(getProperties().getProperty("timeout_millis"));
-                    blockPersistence = Boolean.parseBoolean(getProperties().getProperty("block_persistence"));
-                    persistence = Short.parseShort(getProperties().getProperty("persistence"));
+                    timeoutMillis = Integer.parseInt(getProperties().getProperty("timeout_millis", "5000"));
+                    blockPersistence = Boolean.parseBoolean(getProperties().getProperty("block_persistence", "false"));
+                    persistence = Short.parseShort(getProperties().getProperty("persistence", "0"));
                     String host = getProperties().getProperty("host");
 
                     BabelMessageSerializer serializer = new BabelMessageSerializer(new HashMap<>());
@@ -84,7 +84,7 @@ public class EdgeClient extends DB {
     public Status read(String table, String key, Set<String> fields, Map<String, ByteIterator> result) {
         try {
             int id = idCounter.incrementAndGet();
-            RequestMessage requestMessage = new RequestMessage(id, new Operation.ReadOperation("ola", key));
+            RequestMessage requestMessage = new RequestMessage(id, new Operation.ReadOperation(table, key));
             return executeOperation(requestMessage);
         } catch (Exception e) {
             e.printStackTrace();
@@ -103,7 +103,7 @@ public class EdgeClient extends DB {
         try {
             byte[] value = values.values().iterator().next().toArray();
             int id = idCounter.incrementAndGet();
-            RequestMessage requestMessage = new RequestMessage(id, new Operation.WriteOperation("ola", key, value, persistence));
+            RequestMessage requestMessage = new RequestMessage(id, new Operation.WriteOperation(table, key, value, persistence));
             return executeOperation(requestMessage);
         } catch (Exception e) {
             e.printStackTrace();
@@ -192,9 +192,11 @@ public class EdgeClient extends DB {
             if (evt instanceof ServerUpEvent)
                 channelFuture.complete((ServerUpEvent) evt);
             else if (evt instanceof ServerDownEvent) {
-                System.err.println("Server down!");
+                //TODO migrate
+                System.err.println("Server down! " + ((ServerDownEvent) evt).getCause());
                 System.exit(1);
             } else if (evt instanceof ServerFailedEvent) {
+                //TODO migrate
                 System.err.println("Server failed!");
                 System.exit(1);
             } else {
