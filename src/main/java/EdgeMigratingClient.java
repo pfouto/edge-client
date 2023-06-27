@@ -1,6 +1,9 @@
 import babel.BabelMessage;
 import babel.BabelMessageSerializer;
-import messaging.*;
+import messaging.PersistenceMessage;
+import messaging.ReconfigurationMessage;
+import messaging.RequestMessage;
+import messaging.ResponseMessage;
 import pt.unl.fct.di.novasys.channel.ChannelEvent;
 import pt.unl.fct.di.novasys.channel.ChannelListener;
 import pt.unl.fct.di.novasys.channel.simpleclientserver.SimpleClientChannel;
@@ -19,11 +22,11 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class EdgeClient extends DB {
+public class EdgeMigratingClient extends DB {
 
     private static final AtomicInteger initCounter = new AtomicInteger();
-    private static final Map<Long, CompletableFuture<ResponseMessage>> responseCallbacks = new ConcurrentHashMap<>();
-    private static final Map<Long, CompletableFuture<PersistenceMessage>> persistenceCallbacks = new ConcurrentHashMap<>();
+    private static final Map<Long, CompletableFuture<Optional<ResponseMessage>>> responseCallbacks = new ConcurrentHashMap<>();
+    private static final Map<Long, CompletableFuture<Optional<PersistenceMessage>>> persistenceCallbacks = new ConcurrentHashMap<>();
     private static final AtomicInteger idCounter = new AtomicInteger();
     private static SimpleClientChannel<BabelMessage> channel = null;
 
@@ -45,6 +48,9 @@ public class EdgeClient extends DB {
             //System.err.println(i1 + " " + Thread.currentThread().toString());
             synchronized (initCounter) {
                 if (channel == null) {
+
+                    //TODO call migrate here
+
                     //ONCE
                     timeoutMillis = Integer.parseInt(getProperties().getProperty("timeout_millis", "5000"));
                     blockPersistence = Boolean.parseBoolean(getProperties().getProperty("block_persistence", "false"));
@@ -120,28 +126,37 @@ public class EdgeClient extends DB {
     //TODO partition request
 
     private Status executeOperation(RequestMessage requestMessage) throws InterruptedException, ExecutionException {
-        CompletableFuture<ResponseMessage> future = new CompletableFuture<>();
-        responseCallbacks.put(requestMessage.getOpId(), future);
-
-        //Create persistence callback if configured
-        CompletableFuture<PersistenceMessage> persistFuture = null;
-        if (requestMessage.getOp().getType() == Operation.WRITE && blockPersistence) {
-            persistFuture = new CompletableFuture<>();
-            persistenceCallbacks.put(requestMessage.getOpId(), persistFuture);
-        }
-
-        channel.sendMessage(new BabelMessage(requestMessage, (short) 400, (short) 400), null, 0);
         try {
-            ResponseMessage resp = future.get(timeoutMillis, TimeUnit.MILLISECONDS);
-            //Handle clock
-            if(resp.getHlc() != null)
-                localClock = localClock.max(resp.getHlc());
+            while(true) {
+                CompletableFuture<Optional<ResponseMessage>> future = new CompletableFuture<>();
+                responseCallbacks.put(requestMessage.getOpId(), future);
 
-            //Maybe wait for persistence
-            if(requestMessage.getOp().getType() == Operation.WRITE && blockPersistence) {
-                persistFuture.get(timeoutMillis, TimeUnit.MILLISECONDS);
+                //Create persistence callback if configured
+                CompletableFuture<Optional<PersistenceMessage>> persistFuture = null;
+                if (requestMessage.getOp().getType() == Operation.WRITE && blockPersistence) {
+                    persistFuture = new CompletableFuture<>();
+                    persistenceCallbacks.put(requestMessage.getOpId(), persistFuture);
+                }
+
+                channel.sendMessage(new BabelMessage(requestMessage, (short) 400, (short) 400), null, 0);
+                Optional<ResponseMessage> optResp = future.get(timeoutMillis, TimeUnit.MILLISECONDS);
+                //Handle clock
+                if (optResp.isPresent()) {
+                    ResponseMessage resp = optResp.get();
+
+                    if (resp.getHlc() != null)
+                        localClock = localClock.max(resp.getHlc());
+
+                    //Maybe wait for persistence
+                    if (requestMessage.getOp().getType() == Operation.WRITE && blockPersistence) {
+                        persistFuture.get(timeoutMillis, TimeUnit.MILLISECONDS);
+                    }
+                    return Status.OK;
+                } else {
+                    //TODO block until migration ends (how do I know?)
+                    //TODO active sleep loop waiting for server not to be null?
+                }
             }
-            return Status.OK;
         } catch (TimeoutException ex) {
             System.err.println("Op Timed out..." + requestMessage.getOpId());
             System.exit(1);
@@ -159,6 +174,11 @@ public class EdgeClient extends DB {
         throw new AssertionError();
     }
 
+    static void migrate(){
+        //TODO complete all futures
+        //TODO create new channel and wait for it to connect
+
+    }
     static class ChannelHandler implements ChannelListener<BabelMessage> {
         //Singleton class, methods called by channel thread
 
@@ -166,11 +186,11 @@ public class EdgeClient extends DB {
         public void deliverMessage(BabelMessage msg, Host from) {
             if (msg.getMessage() instanceof ResponseMessage) {
                 ResponseMessage message = (ResponseMessage) msg.getMessage();
-                responseCallbacks.remove(message.getOpId()).complete(message);
+                responseCallbacks.remove(message.getOpId()).complete(Optional.of(message));
             } else if (msg.getMessage() instanceof PersistenceMessage) {
                 PersistenceMessage message = (PersistenceMessage) msg.getMessage();
-                if(blockPersistence)
-                    persistenceCallbacks.remove(message.getOpId()).complete(message);
+                if (blockPersistence)
+                    persistenceCallbacks.remove(message.getOpId()).complete(Optional.of(message));
             } else if (msg.getMessage() instanceof ReconfigurationMessage) {
                 ReconfigurationMessage message = (ReconfigurationMessage) msg.getMessage();
                 currentHosts = message.getHosts();
@@ -195,9 +215,11 @@ public class EdgeClient extends DB {
             if (evt instanceof ServerUpEvent)
                 channelFuture.complete((ServerUpEvent) evt);
             else if (evt instanceof ServerDownEvent) {
+                migrate();
                 System.err.println("Server down! " + ((ServerDownEvent) evt).getCause());
                 System.exit(1);
             } else if (evt instanceof ServerFailedEvent) {
+                migrate();
                 System.err.println("Server failed! " + ((ServerFailedEvent) evt).getCause());
                 System.exit(1);
             } else {
