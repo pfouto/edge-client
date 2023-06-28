@@ -18,13 +18,14 @@ import java.net.UnknownHostException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class EdgeClient extends DB {
 
     private static final AtomicInteger initCounter = new AtomicInteger();
     private static final Map<Long, CompletableFuture<ResponseMessage>> responseCallbacks = new ConcurrentHashMap<>();
     private static final Map<Long, CompletableFuture<PersistenceMessage>> persistenceCallbacks = new ConcurrentHashMap<>();
-    private static final AtomicInteger idCounter = new AtomicInteger();
+    private static final AtomicLong idCounter = new AtomicLong();
     private static SimpleClientChannel<BabelMessage> channel = null;
 
     private static CompletableFuture<ServerUpEvent> channelFuture = null;
@@ -45,6 +46,7 @@ public class EdgeClient extends DB {
             //System.err.println(i1 + " " + Thread.currentThread().toString());
             synchronized (initCounter) {
                 if (channel == null) {
+                    System.err.println("Arguments: " + getProperties());
                     //ONCE
                     timeoutMillis = Integer.parseInt(getProperties().getProperty("timeout_millis", "5000"));
                     blockPersistence = Boolean.parseBoolean(getProperties().getProperty("block_persistence", "false"));
@@ -62,8 +64,8 @@ public class EdgeClient extends DB {
                     props.put(SimpleClientChannel.ADDRESS_KEY, host);
                     props.put(SimpleClientChannel.PORT_KEY, "2400");
                     props.put(SimpleClientChannel.CONNECT_TIMEOUT_KEY, "10000");
-                    props.put(SimpleClientChannel.HEARTBEAT_INTERVAL_KEY, "5000");
-                    props.put(SimpleClientChannel.HEARTBEAT_TOLERANCE_KEY, "20000");
+                    props.put(SimpleClientChannel.HEARTBEAT_INTERVAL_KEY, "0");
+                    props.put(SimpleClientChannel.HEARTBEAT_TOLERANCE_KEY, "0");
                     channel = new SimpleClientChannel<>(serializer, new ChannelHandler(), props);
 
                     channelFuture = new CompletableFuture<>();
@@ -75,7 +77,7 @@ public class EdgeClient extends DB {
                     //END ONCE ----------
                 }
                 int threadId = initCounter.getAndIncrement();
-                System.err.println("Thread " + threadId + " started");
+                //System.err.println("Thread " + threadId + " started");
             }
         } catch (UnknownHostException | InterruptedException | ExecutionException e) {
             e.printStackTrace();
@@ -86,7 +88,7 @@ public class EdgeClient extends DB {
     @Override
     public Status read(String table, String key, Set<String> fields, Map<String, ByteIterator> result) {
         try {
-            int id = idCounter.incrementAndGet();
+            long id = idCounter.incrementAndGet();
             RequestMessage requestMessage = new RequestMessage(id, new Operation.ReadOperation(table, key));
             return executeOperation(requestMessage);
         } catch (Exception e) {
@@ -98,14 +100,9 @@ public class EdgeClient extends DB {
 
     @Override
     public Status update(String table, String key, Map<String, ByteIterator> values) {
-        return insert(table, key, values);
-    }
-
-    @Override
-    public Status insert(String table, String key, Map<String, ByteIterator> values) {
         try {
             byte[] value = values.values().iterator().next().toArray();
-            int id = idCounter.incrementAndGet();
+            long id = idCounter.incrementAndGet();
             RequestMessage requestMessage = new RequestMessage(id, new Operation.WriteOperation(table, key, value, persistence));
             return executeOperation(requestMessage);
         } catch (Exception e) {
@@ -115,9 +112,10 @@ public class EdgeClient extends DB {
         }
     }
 
-    //TODO migration
-
-    //TODO partition request
+    @Override
+    public Status insert(String table, String key, Map<String, ByteIterator> values) {
+        throw new AssertionError();
+    }
 
     private Status executeOperation(RequestMessage requestMessage) throws InterruptedException, ExecutionException {
         CompletableFuture<ResponseMessage> future = new CompletableFuture<>();
@@ -134,16 +132,17 @@ public class EdgeClient extends DB {
         try {
             ResponseMessage resp = future.get(timeoutMillis, TimeUnit.MILLISECONDS);
             //Handle clock
-            if(resp.getHlc() != null)
+            if (resp.getHlc() != null)
                 localClock = localClock.max(resp.getHlc());
 
             //Maybe wait for persistence
-            if(requestMessage.getOp().getType() == Operation.WRITE && blockPersistence) {
+            if (requestMessage.getOp().getType() == Operation.WRITE && blockPersistence) {
                 persistFuture.get(timeoutMillis, TimeUnit.MILLISECONDS);
             }
             return Status.OK;
         } catch (TimeoutException ex) {
-            System.err.println("Op Timed out..." + requestMessage.getOpId());
+            System.err.println("Op Timed out..." + requestMessage.getOpId() + " " +  requestMessage.getOp());
+            ex.printStackTrace();
             System.exit(1);
             return Status.SERVICE_UNAVAILABLE;
         }
@@ -169,7 +168,7 @@ public class EdgeClient extends DB {
                 responseCallbacks.remove(message.getOpId()).complete(message);
             } else if (msg.getMessage() instanceof PersistenceMessage) {
                 PersistenceMessage message = (PersistenceMessage) msg.getMessage();
-                if(blockPersistence)
+                if (blockPersistence)
                     persistenceCallbacks.remove(message.getOpId()).complete(message);
             } else if (msg.getMessage() instanceof ReconfigurationMessage) {
                 ReconfigurationMessage message = (ReconfigurationMessage) msg.getMessage();

@@ -376,9 +376,13 @@ public class EdgePeriodicWorkload extends Workload {
 
     protected Random r;
 
-    protected String currentTable;
+    protected String[] currentTables;
 
     private Measurements measurements = Measurements.getMeasurements();
+
+    private boolean localTime = false;
+
+    private static long startTime = System.currentTimeMillis();
 
     public static String buildKeyName(long keynum, int zeropadding, boolean orderedinserts) {
         if (!orderedinserts) {
@@ -646,14 +650,26 @@ public class EdgePeriodicWorkload extends Workload {
             return false;
         }
 
-        long timeMillis = (System.nanoTime() / 1000000) + remoteDurationMs;
+        long elapsed = System.currentTimeMillis() - startTime;
 
-        boolean local = (timeMillis % remoteIntervalMs) >= remoteDurationMs;
-        if(local){
-            currentTable = randomTable(localTables);
+        //Add remote duration to start local
+        boolean local;
+        if(elapsed < remoteIntervalMs) {
+            local = true;
         } else {
-            int intervalIndex = (int) (timeMillis / remoteIntervalMs);
-            currentTable = remoteTables[intervalIndex % remoteTables.length];
+            local = (elapsed % remoteIntervalMs) >= remoteDurationMs;
+        }
+
+        if(local != localTime || currentTables == null) {
+            localTime = local;
+            if (local) {
+                currentTables = localTables;
+                System.err.println("Switching to local tables " + Arrays.toString(currentTables) + " at " + elapsed + " ms");
+            } else {
+                String remoteTable = randomTable(remoteTables);
+                currentTables = new String[]{remoteTable};
+                System.err.println("Switching to remote table " + Arrays.toString(currentTables) + " at " + elapsed + " ms");
+            }
         }
 
         switch (operation) {
@@ -725,7 +741,7 @@ public class EdgePeriodicWorkload extends Workload {
         // choose a random key
         long keynum = nextKeynum();
 
-        String table = currentTable;
+        String table = randomTable(currentTables);
 
         String keyname = EdgePeriodicWorkload.buildKeyName(keynum, zeropadding, orderedinserts);
 
@@ -761,7 +777,7 @@ public class EdgePeriodicWorkload extends Workload {
     public void doTransactionUpdate(DB db) {
         // choose a random key
         long keynum = nextKeynum();
-        String table = currentTable;
+        String table = randomTable(currentTables);
 
         String keyname = EdgePeriodicWorkload.buildKeyName(keynum, zeropadding, orderedinserts);
 

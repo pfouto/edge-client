@@ -11,7 +11,7 @@ echo "$(date) Running client jar..." > /proc/1/fd/1
 echo "$@" > /proc/1/fd/1
 
 #java -jar client.jar "$@" > /proc/1/fd/1 2>&1
-java -cp client.jar site.ycsb.Client -t -s -P config.properties "$@" 2> ${log_file}.err 1> ${log_file}.out
+java -Xmx3g -cp client.jar site.ycsb.Client -t -s -P config.properties "$@" 2> ${log_file}.err 1> ${log_file}.out
 #java -cp client.jar site.ycsb.Client -t -s -P config.properties "$@" > /proc/1/fd/1 2>&1
 
 

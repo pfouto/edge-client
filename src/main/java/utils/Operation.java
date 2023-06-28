@@ -7,6 +7,7 @@ import pt.unl.fct.di.novasys.network.data.Host;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class Operation {
@@ -121,6 +122,14 @@ public class Operation {
         public String getKey() {
             return key;
         }
+
+        @Override
+        public String toString() {
+            return "ReadOperation{" +
+                    "partition='" + partition + '\'' +
+                    ", key='" + key + '\'' +
+                    '}';
+        }
     }
 
     public static class WriteOperation extends Operation {
@@ -149,6 +158,16 @@ public class Operation {
             return value;
         }
 
+        @Override
+        public String toString() {
+            return "WriteOperation{" +
+                    "partition='" + partition + '\'' +
+                    ", key='" + key + '\'' +
+                    ", value=" + value.length +
+                    ", persistence=" + persistence +
+                    '}';
+        }
+
         public short getPersistence() {
             return persistence;
         }
@@ -172,6 +191,14 @@ public class Operation {
         public List<Host> getPath() {
             return path;
         }
+
+        @Override
+        public String toString() {
+            return "MigrationOperation{" +
+                    "hlc=" + hlc +
+                    ", path=" + path +
+                    '}';
+        }
     }
 
     public static class PartitionFetchOperation extends Operation {
@@ -180,6 +207,13 @@ public class Operation {
         public PartitionFetchOperation(String partition) {
             super(PARTITION_FETCH);
             this.partition = partition;
+        }
+
+        @Override
+        public String toString() {
+            return "PartitionFetchOperation{" +
+                    "partition='" + partition + '\'' +
+                    '}';
         }
 
         public String getPartition() {
