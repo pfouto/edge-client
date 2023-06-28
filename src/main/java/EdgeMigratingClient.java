@@ -148,7 +148,15 @@ public class EdgeMigratingClient extends DB {
                     responseCallbacks.put(migId, future);
                     channel.sendMessage(new BabelMessage(migMsg, (short) 400, (short) 400), null, 0);
                     migrationLock.readLock().unlock();
-                    Optional<ResponseMessage> optResp = future.get(timeoutMillis, TimeUnit.MILLISECONDS);
+
+                    Optional<ResponseMessage> optResp;
+                    try {
+                        optResp = future.get(timeoutMillis, TimeUnit.MILLISECONDS);
+                    } catch (TimeoutException ex) {
+                            System.err.println("Op Timed out..." + migMsg);
+                            System.exit(1);
+                            return Status.SERVICE_UNAVAILABLE;
+                    }
                     if (optResp.isPresent()) {
                         System.err.println("Thread " + threadId + " migrated");
                         lastChannel = channel;
