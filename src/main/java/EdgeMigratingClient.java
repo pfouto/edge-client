@@ -58,6 +58,7 @@ public class EdgeMigratingClient extends DB {
             //System.err.println(i1 + " " + Thread.currentThread().toString());
             synchronized (initCounter) {
                 if (channel == null) {
+                    System.err.println("Arguments: " + getProperties());
 
                     //TODO call migrate here
 
@@ -282,6 +283,7 @@ public class EdgeMigratingClient extends DB {
             } else if (msg.getMessage() instanceof ReconfigurationMessage) {
                 ReconfigurationMessage message = (ReconfigurationMessage) msg.getMessage();
                 currentBranch = message.getHosts();
+                System.err.println("New branch " + currentBranch);
             } else {
                 System.err.println("Unknown message type!");
                 System.exit(1);
