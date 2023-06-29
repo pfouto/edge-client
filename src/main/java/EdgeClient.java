@@ -33,9 +33,6 @@ public class EdgeClient extends DB {
     private static short persistence;
     private static int timeoutMillis;
 
-    private static boolean blockPersistence;
-
-
     private HybridTimestamp localClock = new HybridTimestamp(0, 0);
     private static List<Host> currentHosts = new ArrayList<>();
 
@@ -49,7 +46,6 @@ public class EdgeClient extends DB {
                     System.err.println("Arguments: " + getProperties());
                     //ONCE
                     timeoutMillis = Integer.parseInt(getProperties().getProperty("timeout_millis", "5000"));
-                    blockPersistence = Boolean.parseBoolean(getProperties().getProperty("block_persistence", "false"));
                     persistence = Short.parseShort(getProperties().getProperty("persistence", "0"));
                     String host = getProperties().getProperty("host");
 
@@ -123,7 +119,7 @@ public class EdgeClient extends DB {
 
         //Create persistence callback if configured
         CompletableFuture<PersistenceMessage> persistFuture = null;
-        if (requestMessage.getOp().getType() == Operation.WRITE && blockPersistence) {
+        if (requestMessage.getOp().getType() == Operation.WRITE && persistence > 0) {
             persistFuture = new CompletableFuture<>();
             persistenceCallbacks.put(requestMessage.getOpId(), persistFuture);
         }
@@ -136,7 +132,7 @@ public class EdgeClient extends DB {
                 localClock = localClock.max(resp.getHlc());
 
             //Maybe wait for persistence
-            if (requestMessage.getOp().getType() == Operation.WRITE && blockPersistence) {
+            if (requestMessage.getOp().getType() == Operation.WRITE && persistence > 0) {
                 persistFuture.get(timeoutMillis, TimeUnit.MILLISECONDS);
             }
             return Status.OK;
@@ -168,7 +164,7 @@ public class EdgeClient extends DB {
                 responseCallbacks.remove(message.getOpId()).complete(message);
             } else if (msg.getMessage() instanceof PersistenceMessage) {
                 PersistenceMessage message = (PersistenceMessage) msg.getMessage();
-                if (blockPersistence)
+                if (persistence > 0)
                     persistenceCallbacks.remove(message.getOpId()).complete(message);
             } else if (msg.getMessage() instanceof ReconfigurationMessage) {
                 ReconfigurationMessage message = (ReconfigurationMessage) msg.getMessage();

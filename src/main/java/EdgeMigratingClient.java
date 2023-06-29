@@ -39,7 +39,7 @@ public class EdgeMigratingClient extends DB {
 
     private static short persistence;
     private static int timeoutMillis;
-    private static boolean blockPersistence;
+    private static int migrationTimeoutMillis;
 
     //Channel parameters
     private static BabelMessageSerializer serializer;
@@ -60,11 +60,9 @@ public class EdgeMigratingClient extends DB {
                 if (channel == null) {
                     System.err.println("Arguments: " + getProperties());
 
-                    //TODO call migrate here
-
                     //ONCE
                     timeoutMillis = Integer.parseInt(getProperties().getProperty("timeout_millis", "5000"));
-                    blockPersistence = Boolean.parseBoolean(getProperties().getProperty("block_persistence", "false"));
+                    migrationTimeoutMillis = Integer.parseInt(getProperties().getProperty("migration_timeout_millis", "5000"));
                     persistence = Short.parseShort(getProperties().getProperty("persistence", "0"));
                     String host = getProperties().getProperty("host");
 
@@ -136,49 +134,49 @@ public class EdgeMigratingClient extends DB {
     }
 
     private Status executeOperation(Operation op) throws InterruptedException, ExecutionException {
-        try {
-            while (true) {
-                migrationLock.readLock().lock();
 
-                if (channel != lastChannel) {
-                    System.err.println("Thread " + threadId + " detected new channel, migrating...");
-                    long migId = idCounter.incrementAndGet();
-                    RequestMessage migMsg = new RequestMessage(migId, new Operation.MigrationOperation(localClock, oldBranch));
-                    CompletableFuture<Optional<ResponseMessage>> future = new CompletableFuture<>();
-                    responseCallbacks.put(migId, future);
-                    channel.sendMessage(new BabelMessage(migMsg, (short) 400, (short) 400), null, 0);
-                    migrationLock.readLock().unlock();
+        while (true) {
+            migrationLock.readLock().lock();
 
-                    Optional<ResponseMessage> optResp;
-                    try {
-                        optResp = future.get(timeoutMillis, TimeUnit.MILLISECONDS);
-                    } catch (TimeoutException ex) {
-                            System.err.println("Op Timed out..." + migMsg);
-                            System.exit(1);
-                            return Status.SERVICE_UNAVAILABLE;
-                    }
-                    if (optResp.isPresent()) {
-                        System.err.println("Thread " + threadId + " migrated");
-                        lastChannel = channel;
-                    } else {
-                        System.err.println("Thread " + threadId + " migration failed");
-                    }
+            if (channel != lastChannel) {
+                System.err.println("Thread " + threadId + " detected new channel, migrating...");
+                long migId = idCounter.incrementAndGet();
+                RequestMessage migMsg = new RequestMessage(migId, new Operation.MigrationOperation(localClock, oldBranch));
+                CompletableFuture<Optional<ResponseMessage>> future = new CompletableFuture<>();
+                responseCallbacks.put(migId, future);
+                channel.sendMessage(new BabelMessage(migMsg, (short) 400, (short) 400), null, 0);
+                migrationLock.readLock().unlock();
+
+                Optional<ResponseMessage> optResp;
+                try {
+                    optResp = future.get(migrationTimeoutMillis, TimeUnit.MILLISECONDS);
+                } catch (TimeoutException ex) {
+                    System.err.println("Op Timed out... " + migMsg);
+                    System.exit(1);
+                    return Status.SERVICE_UNAVAILABLE;
+                }
+                if (optResp.isPresent()) {
+                    System.err.println("Thread " + threadId + " migrated");
+                    lastChannel = channel;
                 } else {
-                    long opId = idCounter.incrementAndGet();
-                    RequestMessage requestMessage = new RequestMessage(opId, op);
-                    CompletableFuture<Optional<ResponseMessage>> future = new CompletableFuture<>();
-                    responseCallbacks.put(opId, future);
+                    System.err.println("Thread " + threadId + " migration failed");
+                }
+            } else {
+                long opId = idCounter.incrementAndGet();
+                RequestMessage requestMessage = new RequestMessage(opId, op);
+                CompletableFuture<Optional<ResponseMessage>> future = new CompletableFuture<>();
+                responseCallbacks.put(opId, future);
 
-                    //Create persistence callback if configured
-                    CompletableFuture<Optional<PersistenceMessage>> persistFuture = null;
-                    if (requestMessage.getOp().getType() == Operation.WRITE && blockPersistence) {
-                        persistFuture = new CompletableFuture<>();
-                        persistenceCallbacks.put(requestMessage.getOpId(), persistFuture);
-                    }
+                //Create persistence callback if configured
+                CompletableFuture<Optional<PersistenceMessage>> persistFuture = null;
+                if (requestMessage.getOp().getType() == Operation.WRITE && persistence > 0) {
+                    persistFuture = new CompletableFuture<>();
+                    persistenceCallbacks.put(requestMessage.getOpId(), persistFuture);
+                }
 
-                    channel.sendMessage(new BabelMessage(requestMessage, (short) 400, (short) 400), null, 0);
-                    migrationLock.readLock().unlock();
-
+                channel.sendMessage(new BabelMessage(requestMessage, (short) 400, (short) 400), null, 0);
+                migrationLock.readLock().unlock();
+                try {
                     Optional<ResponseMessage> optResp = future.get(timeoutMillis, TimeUnit.MILLISECONDS);
                     //Handle clock
                     if (optResp.isPresent()) {
@@ -188,7 +186,7 @@ public class EdgeMigratingClient extends DB {
                             localClock = localClock.max(resp.getHlc());
 
                         //Maybe wait for persistence
-                        if (requestMessage.getOp().getType() == Operation.WRITE && blockPersistence) {
+                        if (requestMessage.getOp().getType() == Operation.WRITE && persistence > 0) {
                             Optional<PersistenceMessage> optPer = persistFuture.get(timeoutMillis, TimeUnit.MILLISECONDS);
                             if (optPer.isPresent()) {
                                 return Status.OK;
@@ -203,13 +201,14 @@ public class EdgeMigratingClient extends DB {
                         System.err.println("Op response empty, assuming migration " + threadId);
                         //Else will just loop again (blocking until the migration finishes)
                     }
+                } catch (TimeoutException ex) {
+                    System.err.println("Op Timed out..." + requestMessage);
+                    System.exit(1);
+                    return Status.SERVICE_UNAVAILABLE;
                 }
             }
-        } catch (TimeoutException ex) {
-            System.err.println("Op Timed out..." + op);
-            System.exit(1);
-            return Status.SERVICE_UNAVAILABLE;
         }
+
     }
 
     @Override
@@ -286,7 +285,7 @@ public class EdgeMigratingClient extends DB {
                 responseCallbacks.remove(message.getOpId()).complete(Optional.of(message));
             } else if (msg.getMessage() instanceof PersistenceMessage) {
                 PersistenceMessage message = (PersistenceMessage) msg.getMessage();
-                if (blockPersistence)
+                if (persistence > 0)
                     persistenceCallbacks.remove(message.getOpId()).complete(Optional.of(message));
             } else if (msg.getMessage() instanceof ReconfigurationMessage) {
                 ReconfigurationMessage message = (ReconfigurationMessage) msg.getMessage();

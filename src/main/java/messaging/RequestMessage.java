@@ -26,6 +26,14 @@ public class RequestMessage extends ProtoMessage {
         this.op = op;
     }
 
+    @Override
+    public String toString() {
+        return "RequestMessage{" +
+                "opId=" + opId +
+                ", op=" + op +
+                '}';
+    }
+
     public static ISerializer<? extends ProtoMessage> serializer = new ISerializer<RequestMessage>() {
         public void serialize(RequestMessage msg, ByteBuf out) throws IOException {
             out.writeLong(msg.getOpId());
