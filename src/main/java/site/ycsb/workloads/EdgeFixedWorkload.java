@@ -426,6 +426,8 @@ public class EdgeFixedWorkload extends Workload {
       throw new WorkloadException("No tables specified, check the " + TABLENAMES_PROPERTY + " property.");
     }
 
+    System.err.println("Tables are " + Arrays.toString(tables));
+
     fieldcount =
         Long.parseLong(p.getProperty(FIELD_COUNT_PROPERTY, FIELD_COUNT_PROPERTY_DEFAULT));
     final String fieldnameprefix = p.getProperty(FIELD_NAME_PREFIX, FIELD_NAME_PREFIX_DEFAULT);
