@@ -72,6 +72,7 @@ public class EdgePeriodicWorkload extends Workload {
     public static final String TABLENAMES_REMOTE_PROPERTY = "remote_tables";
     public static final String REMOTE_DURATION_PROPERTY = "remote_duration";
     public static final String REMOTE_INTERVAL_PROPERTY = "remote_interval";
+    public static final String REMOTE_OFFSET_PROPERTY = "remote_offset";
 
     /**
      * The default name of the database table to run queries against.
@@ -82,6 +83,8 @@ public class EdgePeriodicWorkload extends Workload {
 
     protected long remoteDurationMs;
     protected long remoteIntervalMs;
+
+    protected long remoteOffsetMs;
 
     /**
      * The name of the property for the number of fields in a record.
@@ -444,6 +447,11 @@ public class EdgePeriodicWorkload extends Workload {
         }
         remoteDurationMs = Long.parseLong(p.getProperty(REMOTE_DURATION_PROPERTY));
         remoteIntervalMs = Long.parseLong(p.getProperty(REMOTE_INTERVAL_PROPERTY));
+        remoteOffsetMs = Long.parseLong(p.getProperty(REMOTE_OFFSET_PROPERTY));
+
+        System.err.println("DurationMs: " + remoteDurationMs);
+        System.err.println("IntervalMs: " + remoteIntervalMs);
+        System.err.println("OffsetMs: " + remoteOffsetMs);
 
         fieldcount =
                 Long.parseLong(p.getProperty(FIELD_COUNT_PROPERTY, FIELD_COUNT_PROPERTY_DEFAULT));
@@ -654,10 +662,10 @@ public class EdgePeriodicWorkload extends Workload {
 
         //Add remote duration to start local
         boolean local;
-        if(elapsed < remoteIntervalMs) {
+        if(elapsed < remoteOffsetMs) {
             local = true;
         } else {
-            local = (elapsed % remoteIntervalMs) >= remoteDurationMs;
+            local = ((elapsed-remoteOffsetMs) % remoteIntervalMs) >= remoteDurationMs;
         }
 
         if(local != localTime || currentTables == null) {
