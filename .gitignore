@@ -1,5 +1,3 @@
-deploy/client.jar
-
 # ignore compiled byte code
 target
 
